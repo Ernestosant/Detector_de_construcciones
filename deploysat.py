@@ -7,12 +7,14 @@ Original file is located at
     https://colab.research.google.com/drive/1U0AzJELiOhA-2icTY5s1qYgzEOBIP7hH
 """
 
+!pip install rasterio
+!pip install shapely
 
 import os
-import matplotlib
-import matplotlib.pyplot as plt
+#import matplotlib
+#import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+#import pandas as pd
 import rasterio.features
 import shapely.geometry
 import shapely.ops
@@ -137,19 +139,24 @@ def mask_to_poly(mask, image_id, count_border_as_background=True):
     df.loc[:, 'area_ratio'] = df.area_size / df.area_size.max()
     return df, polygons
 
-# visualizar polígonos
-df, pol = mask_to_poly(np.asarray(pred_arx)+1,'img1')
+#función para calcular el atamaño de los pixeles
+def pixelSize(bounds,img):
+  print(bounds[0,1],bounds[1,1])  
+  delta_w = bounds[0,0]-bounds[3,0]
+  delta_h = bounds[0,1]-bounds[1,1]
+  dim = np.shape(img)
+  w =delta_w/dim[1]
+  
+  h =delta_h/dim[0]
+  print('delta h:',delta_h,'dim[0]:',dim[0])
+  return h,w
 
-print(len(pol))
-print(pol[0].area)
-
-x, y = pol[0].exterior.xy
-
-x, y = pol[0].exterior.xy
-
-# alpha dentro de 0 y 1
-plt.plot(x, y, color='y', alpha=0.9, linewidth=2, solid_capstyle='round', zorder=2) 
-plt.show()
+# función para obtener la geotransformación necesaria para georreferenciar los polígonos.
+def getGeotransform(bounds, img):
+  px, py = bounds[0,0], bounds[0,1]
+  h,w = pixelSize(bounds,img)
+  geotransform= (px, 0.0, w, py, 0.0, h)
+  return geotransform
 
 from rasterio import Affine
 def georref(geotransform, px, py):
@@ -159,14 +166,9 @@ def georref(geotransform, px, py):
     px: coordenadas del punto x
     py: coordenadas del punto y    
       
-  """
+  """  
   fwd = Affine.from_gdal(*geotransform)
   return fwd*(px,py)
-
-#El primero y el cuarto son los offsets x e y, y el segundo y el sexto son los tamaños de píxeles x e y.
-geotransform = (-237481.5, 425.0, 0.0, 237536.4, 0.0, -425.0)
-col, row = 0, 100
-print(georref(geotransform,col,row))
 
 def georref_polys(geotransform,polylist):
   """Esta funcion le asigna coordenadas geograficas a los poligonos.
@@ -187,14 +189,15 @@ def georref_polys(geotransform,polylist):
 
   return geopolylist
 
-geopolylist =georref_polys(geotransform,pol)
-geopolylist[0] # visualizar un polígono
+def geometries(geopolylist):
+  #Esta función crea los diccionarios con la estructura de las geometrías a ser almacenadas en 
+  # el geojson
+  geometry = {"type":"Polygon","coordinates":[geopolylist[0]]}
+  feature = {"type":"Featrue","properties":{},"geometry":geometry}
+  features_collection = {"type": "FeatureCollection","crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },"features":feature}
+  return geometry, feature, features_collection
 
-geometry = {"type":"Polygon","coordinates":[geopolylist[0]]}
-feature = {"type":"Featrue","properties":{},"geometry":geometry}
-features_collection = {"type": "FeatureCollection","crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },"features":feature}
-
-def polyjson(geopolylist):
+def polyjson(geopolylist, geometry, feature, features_collection):
   feature_list =[]
   for geopoly in geopolylist:
     geometry =  {"type":"Polygon","coordinates":[geopoly]}
@@ -226,8 +229,10 @@ def poligonizacion(path_img, path_model, geotransform):
 # probando la funcion
 path_mdl = '/content/drive/MyDrive/fastai/modelo_fastai_1.pkl'
 path_image = '/content/Captura2.PNG'
+geotransform = getGeotransform(Bounds,im)
 polj=poligonizacion(path_image,path_mdl,geotransform)
  #generar geojson
-my_geojson = polyjson(polj)
+geometry, feature, feutures_collection = geometries(polj)
+my_geojson = polyjson(polj,geometry, feature, feutures_collection)
 with open('data2.json', 'w') as file:
   json.dump(my_geojson, file, indent=4)
